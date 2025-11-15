@@ -138,6 +138,7 @@ func (c *Client) ReadDir(path string) ([]os.FileInfo, error) {
 	path = FixSlashes(path)
 	files := make([]os.FileInfo, 0)
 	skipSelf := true
+	
 	parse := func(resp interface{}) error {
 		r := resp.(*response)
 
@@ -178,19 +179,73 @@ func (c *Client) ReadDir(path string) ([]os.FileInfo, error) {
 		return nil
 	}
 
-	err := c.propfind(path, false,
-		`<d:propfind xmlns:d='DAV:'>
-			<d:prop>
-				<d:displayname/>
-				<d:resourcetype/>
-				<d:getcontentlength/>
-				<d:getcontenttype/>
-				<d:getetag/>
-				<d:getlastmodified/>
-			</d:prop>
-		</d:propfind>`,
-		&response{},
-		parse)
+	// 初始请求路径
+	requestPath := path
+	var err error
+	
+	// 记录初始请求路径
+	log(fmt.Sprintf("ReadDir: initial request path: %s", requestPath))
+	
+	pageCount := 0
+	// 循环处理分页
+	for {
+		pageCount++
+		log(fmt.Sprintf("ReadDir: processing page %d, request path: %s", pageCount, requestPath))
+		
+		rs, propErr := c.propfindWithResponse(requestPath, false,
+			`<d:propfind xmlns:d='DAV:'>
+				<d:prop>
+					<d:displayname/>
+					<d:resourcetype/>
+					<d:getcontentlength/>
+					<d:getcontenttype/>
+					<d:getetag/>
+					<d:getlastmodified/>
+				</d:prop>
+			</d:propfind>`,
+			&response{},
+			parse)
+
+		if propErr != nil {
+			err = propErr
+			log(fmt.Sprintf("ReadDir: propfind error: %v", propErr))
+			if rs != nil {
+				rs.Body.Close()
+			}
+			break
+		}
+
+		// 检查是否有下一页 (Link header)
+		linkHeader := rs.Header.Get("Link")
+		log(fmt.Sprintf("ReadDir: Link header value: %s", linkHeader))
+		
+		// 记录当前页获取到的文件数量
+		log(fmt.Sprintf("ReadDir: page %d retrieved %d files", pageCount, len(files)))
+
+		rs.Body.Close()
+
+		if linkHeader == "" {
+			// 没有更多页面，退出循环
+			log("ReadDir: no Link header, no more pages")
+			break
+		}
+
+		// 解析下一页的URL
+		nextURL := parseLinkHeader(linkHeader)
+		log(fmt.Sprintf("ReadDir: parsed next URL: %s", nextURL))
+		
+		if nextURL == "" {
+			// 无法解析下一页URL，退出循环
+			log("ReadDir: failed to parse next URL, no more pages")
+			break
+		}
+		
+		// 更新requestPath为下一页URL
+		requestPath = nextURL
+		log(fmt.Sprintf("ReadDir: updated request path to next URL: %s", requestPath))
+	}
+	
+	log(fmt.Sprintf("ReadDir: completed, total pages: %d, total files: %d", pageCount, len(files)))
 
 	if err != nil {
 		if _, ok := err.(*os.PathError); !ok {
@@ -198,6 +253,23 @@ func (c *Client) ReadDir(path string) ([]os.FileInfo, error) {
 		}
 	}
 	return files, err
+}
+
+// parseLinkHeader 解析Link头部，提取下一页URL
+func parseLinkHeader(linkHeader string) string {
+	// Link头部格式: '<https://example.com/next>; rel="next"'
+	// 我们需要提取URL部分
+	for _, link := range strings.Split(linkHeader, ",") {
+		if strings.Contains(link, `rel="next"`) {
+			// 提取URL部分
+			start := strings.Index(link, "<")
+			end := strings.Index(link, ">")
+			if start >= 0 && end > start {
+				return link[start+1 : end]
+			}
+		}
+	}
+	return ""
 }
 
 // Stat returns the file stats for a specified path

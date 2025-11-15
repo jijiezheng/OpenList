@@ -141,6 +141,39 @@ func (c *Client) propfind(path string, self bool, body string, resp interface{},
 	return parseXML(rs.Body, resp, parse)
 }
 
+// propfindWithResponse executes a PROPFIND request and also returns the HTTP response
+// This is needed to handle pagination where Link headers might be present
+func (c *Client) propfindWithResponse(path string, self bool, body string, resp interface{}, parse func(resp interface{}) error) (*http.Response, error) {
+	rs, err := c.req("PROPFIND", path, strings.NewReader(body), func(rq *http.Request) {
+		if self {
+			rq.Header.Add("Depth", "0")
+		} else {
+			rq.Header.Add("Depth", "1")
+		}
+		rq.Header.Add("Content-Type", "application/xml;charset=UTF-8")
+		rq.Header.Add("Accept", "application/xml,text/xml")
+		rq.Header.Add("Accept-Charset", "utf-8")
+		// TODO add support for 'gzip,deflate;q=0.8,q=0.7'
+		rq.Header.Add("Accept-Encoding", "")
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if rs.StatusCode != 207 {
+		rs.Body.Close()
+		return rs, newPathError("PROPFIND", path, rs.StatusCode)
+	}
+
+	err = parseXML(rs.Body, resp, parse)
+	if err != nil {
+		rs.Body.Close()
+		return rs, err
+	}
+
+	return rs, nil
+}
+
 func (c *Client) doCopyMove(
 	method string,
 	oldpath string,
