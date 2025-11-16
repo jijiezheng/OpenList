@@ -279,30 +279,16 @@ func parseLinkHeader(linkHeader string, root string) string {
 				// 去除root路径前缀
 				if strings.HasPrefix(urlStr, root) {
 					// 如果完整URL以root开头，则使用URL解析后的路径
-					// 并确保路径以/开头
-					if !strings.HasPrefix(path, "/") {
-						path = "/" + path
-					}
 					// 去除root部分后的路径
 					rootURL, _ := url.Parse(root)
 					if rootURL != nil && strings.HasPrefix(path, rootURL.Path) {
 						path = path[len(rootURL.Path):]
-						if path == "" {
-							path = "/"
-						}
 					}
-					if parsedURL.RawQuery != "" {
-						return path + "?" + parsedURL.RawQuery
-					}
-					return path
 				}
 				
 				// 如果root不匹配，尝试去除/dav前缀（坚果云特殊情况）
 				if strings.HasPrefix(path, "/dav") {
 					path = path[4:] // 去除/dav前缀
-					if path == "" {
-						path = "/"
-					}
 				}
 				
 				// 确保路径以/开头
