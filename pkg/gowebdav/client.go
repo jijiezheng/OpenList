@@ -265,13 +265,13 @@ func parseLinkHeader(linkHeader string) string {
 			start := strings.Index(link, "<")
 			end := strings.Index(link, ">")
 			if start >= 0 && end > start {
-				url := link[start+1 : end]
+				urlStr := link[start+1 : end]
 				// 对URL进行重新编码以符合WebDAV服务的要求
-				if parsedURL, err := url.Parse(url); err == nil {
+				if parsedURL, err := url.Parse(urlStr); err == nil {
 					parsedURL.RawQuery = url.QueryEscape(parsedURL.RawQuery)
 					return parsedURL.String()
 				}
-				return url
+				return urlStr
 			}
 		}
 	}
