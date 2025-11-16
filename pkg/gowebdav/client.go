@@ -266,9 +266,13 @@ func parseLinkHeader(linkHeader string) string {
 			end := strings.Index(link, ">")
 			if start >= 0 && end > start {
 				urlStr := link[start+1 : end]
-				// 对URL进行重新编码以符合WebDAV服务的要求
+				// 解析URL并对查询参数进行解码
 				if parsedURL, err := url.Parse(urlStr); err == nil {
-					parsedURL.RawQuery = url.QueryEscape(parsedURL.RawQuery)
+					// 对查询参数进行解码
+					unescapedQuery, err := url.QueryUnescape(parsedURL.RawQuery)
+					if err == nil {
+						parsedURL.RawQuery = unescapedQuery
+					}
 					return parsedURL.String()
 				}
 				return urlStr
