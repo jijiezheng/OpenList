@@ -268,24 +268,46 @@ func parseLinkHeader(linkHeader string, root string) string {
 			if start >= 0 && end > start {
 				urlStr := link[start+1 : end]
 				// 解析URL
-				u, err := url.Parse(urlStr)
+				parsedURL, err := url.Parse(urlStr)
 				if err != nil {
-					continue
+					// 解析失败则返回原始URL
+					return urlStr
 				}
-				// 解析根URL
-				rootURL, err := url.Parse(root)
-				if err != nil {
-					continue
-				}
-				// 比较主机和端口
-				if u.Host == rootURL.Host {
-					// 返回相对路径
-					relativePath := u.Path
-					if u.RawQuery != "" {
-						relativePath += "?" + u.RawQuery
+				
+				// 获取URL路径部分
+				path := parsedURL.Path
+				
+				// 去除root路径前缀
+				if strings.HasPrefix(urlStr, root) {
+					// 如果完整URL以root开头，则使用URL解析后的路径
+					// 并确保路径以/开头
+					if !strings.HasPrefix(path, "/") {
+						path = "/" + path
 					}
-					return relativePath
+					if parsedURL.RawQuery != "" {
+						return path + "?" + parsedURL.RawQuery
+					}
+					return path
 				}
+				
+				// 如果root不匹配，尝试去除/dav前缀（坚果云特殊情况）
+				if strings.HasPrefix(path, "/dav") {
+					path = path[4:] // 去除/dav前缀
+					if path == "" {
+						path = "/"
+					}
+				}
+				
+				// 确保路径以/开头
+				if !strings.HasPrefix(path, "/") {
+					path = "/" + path
+				}
+				
+				// 返回处理后的路径和查询参数
+				if parsedURL.RawQuery != "" {
+					return path + "?" + parsedURL.RawQuery
+				}
+				return path
 			}
 		}
 	}
