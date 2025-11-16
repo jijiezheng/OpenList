@@ -231,7 +231,7 @@ func (c *Client) ReadDir(path string) ([]os.FileInfo, error) {
 		}
 
 		// 解析下一页的URL
-		nextURL := parseLinkHeader(linkHeader)
+		nextURL := parseLinkHeader(linkHeader, c.root)
 		log(fmt.Sprintf("ReadDir: parsed next URL: %s", nextURL))
 		
 		if nextURL == "" {
@@ -256,26 +256,36 @@ func (c *Client) ReadDir(path string) ([]os.FileInfo, error) {
 }
 
 // parseLinkHeader 解析Link头部，提取下一页URL
-func parseLinkHeader(linkHeader string) string {
+func parseLinkHeader(linkHeader string, root string) string {
 	// Link头部格式: '<https://example.com/next>; rel="next"'
 	// 我们需要提取URL部分
 	for _, link := range strings.Split(linkHeader, ",") {
+		link = strings.TrimSpace(link)
 		if strings.Contains(link, `rel="next"`) {
 			// 提取URL部分
 			start := strings.Index(link, "<")
 			end := strings.Index(link, ">")
 			if start >= 0 && end > start {
 				urlStr := link[start+1 : end]
-				// 解析URL并对查询参数进行解码
-				if parsedURL, err := url.Parse(urlStr); err == nil {
-					// 对查询参数进行解码
-					unescapedQuery, err := url.QueryUnescape(parsedURL.RawQuery)
-					if err == nil {
-						parsedURL.RawQuery = unescapedQuery
-					}
-					return parsedURL.String()
+				// 解析URL
+				u, err := url.Parse(urlStr)
+				if err != nil {
+					continue
 				}
-				return urlStr
+				// 解析根URL
+				rootURL, err := url.Parse(root)
+				if err != nil {
+					continue
+				}
+				// 比较主机和端口
+				if u.Host == rootURL.Host {
+					// 返回相对路径
+					relativePath := u.Path
+					if u.RawQuery != "" {
+						relativePath += "?" + u.RawQuery
+					}
+					return relativePath
+				}
 			}
 		}
 	}
