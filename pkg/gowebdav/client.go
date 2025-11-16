@@ -260,7 +260,6 @@ func parseLinkHeader(linkHeader string, root string) string {
 	// Link头部格式: '<https://example.com/next>; rel="next"'
 	// 我们需要提取URL部分
 	for _, link := range strings.Split(linkHeader, ",") {
-		link = strings.TrimSpace(link)
 		if strings.Contains(link, `rel="next"`) {
 			// 提取URL部分
 			start := strings.Index(link, "<")
@@ -283,6 +282,14 @@ func parseLinkHeader(linkHeader string, root string) string {
 					// 并确保路径以/开头
 					if !strings.HasPrefix(path, "/") {
 						path = "/" + path
+					}
+					// 去除root部分后的路径
+					rootURL, _ := url.Parse(root)
+					if rootURL != nil && strings.HasPrefix(path, rootURL.Path) {
+						path = path[len(rootURL.Path):]
+						if path == "" {
+							path = "/"
+						}
 					}
 					if parsedURL.RawQuery != "" {
 						return path + "?" + parsedURL.RawQuery
