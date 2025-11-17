@@ -133,6 +133,7 @@ func getProps(r *response, status string) *props {
 	return nil
 }
 
+
 // ReadDir reads the contents of a remote directory
 func (c *Client) ReadDir(path string) ([]os.FileInfo, error) {
 	path = FixSlashes(path)
@@ -183,15 +184,8 @@ func (c *Client) ReadDir(path string) ([]os.FileInfo, error) {
 	requestPath := path
 	var err error
 	
-	// 记录初始请求路径
-	log(fmt.Sprintf("ReadDir: initial request path: %s", requestPath))
-	
-	pageCount := 0
 	// 循环处理分页
 	for {
-		pageCount++
-		log(fmt.Sprintf("ReadDir: processing page %d, request path: %s", pageCount, requestPath))
-		
 		rs, propErr := c.propfindWithResponse(requestPath, false,
 			`<d:propfind xmlns:d='DAV:'>
 				<d:prop>
@@ -208,7 +202,6 @@ func (c *Client) ReadDir(path string) ([]os.FileInfo, error) {
 
 		if propErr != nil {
 			err = propErr
-			log(fmt.Sprintf("ReadDir: propfind error: %v", propErr))
 			if rs != nil {
 				rs.Body.Close()
 			}
@@ -217,36 +210,26 @@ func (c *Client) ReadDir(path string) ([]os.FileInfo, error) {
 
 		// 检查是否有下一页 (Link header)
 		linkHeader := rs.Header.Get("Link")
-		log(fmt.Sprintf("ReadDir: Link header value: %s", linkHeader))
-		
-		// 记录当前页获取到的文件数量
-		log(fmt.Sprintf("ReadDir: page %d retrieved %d files", pageCount, len(files)))
 
 		rs.Body.Close()
 
 		if linkHeader == "" {
 			// 没有更多页面，退出循环
-			log("ReadDir: no Link header, no more pages")
 			break
 		}
 
 		// 解析下一页的URL
 		nextURL := parseLinkHeader(linkHeader, c.root)
-		log(fmt.Sprintf("ReadDir: parsed next URL: %s", nextURL))
 		
 		if nextURL == "" {
 			// 无法解析下一页URL，退出循环
-			log("ReadDir: failed to parse next URL, no more pages")
 			break
 		}
 		
 		// 更新requestPath为下一页URL
 		requestPath = nextURL
-		log(fmt.Sprintf("ReadDir: updated request path to next URL: %s", requestPath))
 	}
 	
-	log(fmt.Sprintf("ReadDir: completed, total pages: %d, total files: %d", pageCount, len(files)))
-
 	if err != nil {
 		if _, ok := err.(*os.PathError); !ok {
 			err = newPathErrorErr("ReadDir", path, err)
@@ -266,41 +249,9 @@ func parseLinkHeader(linkHeader string, root string) string {
 			end := strings.Index(link, ">")
 			if start >= 0 && end > start {
 				urlStr := link[start+1 : end]
-				// 解析URL
-				parsedURL, err := url.Parse(urlStr)
-				if err != nil {
-					// 解析失败则返回原始URL
-					return urlStr
-				}
-				
-				// 获取URL路径部分
-				path := parsedURL.Path
-				
-				// 去除root路径前缀
-				if strings.HasPrefix(urlStr, root) {
-					// 如果完整URL以root开头，则使用URL解析后的路径
-					// 去除root部分后的路径
-					rootURL, _ := url.Parse(root)
-					if rootURL != nil && strings.HasPrefix(path, rootURL.Path) {
-						path = path[len(rootURL.Path):]
-					}
-				}
-				
-				// 如果root不匹配，尝试去除/dav前缀（坚果云特殊情况）
-				if strings.HasPrefix(path, "/dav") {
-					path = path[4:] // 去除/dav前缀
-				}
-				
-				// 确保路径以/开头
-				if !strings.HasPrefix(path, "/") {
-					path = "/" + path
-				}
-				
-				// 返回处理后的路径和查询参数
-				if parsedURL.RawQuery != "" {
-					return path + "?" + parsedURL.RawQuery
-				}
-				return path
+				// 直接返回解析后的完整URL，不做额外处理
+				// 这样可以避免因为路径处理错误导致的400错误
+				return urlStr
 			}
 		}
 	}

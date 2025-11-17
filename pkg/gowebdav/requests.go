@@ -2,9 +2,9 @@ package gowebdav
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 )
@@ -13,6 +13,15 @@ func (c *Client) req(method, path string, body io.Reader, intercept func(*http.R
 	var r *http.Request
 	var retryBuf io.Reader
 	canRetry := true
+	
+	// 检查path是否已经是完整URL
+	var requestURL string
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		requestURL = path
+	} else {
+		requestURL = PathEscape(Join(c.root, path))
+	}
+	
 	if body != nil {
 		// If the authorization fails, we will need to restart reading
 		// from the passed body stream.
@@ -32,9 +41,9 @@ func (c *Client) req(method, path string, body io.Reader, intercept func(*http.R
 			retryBuf = buff
 			body = io.TeeReader(body, buff)
 		}
-		r, err = http.NewRequest(method, PathEscape(Join(c.root, path)), body)
+		r, err = http.NewRequest(method, requestURL, body)
 	} else {
-		r, err = http.NewRequest(method, PathEscape(Join(c.root, path)), nil)
+		r, err = http.NewRequest(method, requestURL, nil)
 	}
 
 	if err != nil {
