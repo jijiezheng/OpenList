@@ -2,9 +2,9 @@ package gowebdav
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"path"
 	"strings"
 )
