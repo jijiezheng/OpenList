@@ -138,54 +138,55 @@ func getProps(r *response, status string) *props {
 func (c *Client) ReadDir(path string) ([]os.FileInfo, error) {
 	path = FixSlashes(path)
 	files := make([]os.FileInfo, 0)
-	skipSelf := true
 	
-	parse := func(resp interface{}) error {
-		r := resp.(*response)
-
-		if skipSelf {
-			skipSelf = false
-			if p := getProps(r, "200"); p != nil && p.Type.Local == "collection" {
-				r.Props = nil
-				return nil
-			}
-			return newPathError("ReadDir", path, 405)
-		}
-
-		if p := getProps(r, "200"); p != nil {
-			f := new(File)
-			if ps, err := url.PathUnescape(r.Href); err == nil {
-				f.name = pathpkg.Base(ps)
-			} else {
-				f.name = p.Name
-			}
-			f.path = path + f.name
-			f.modified = parseModified(&p.Modified)
-			f.etag = p.ETag
-			f.contentType = p.ContentType
-
-			if p.Type.Local == "collection" {
-				f.path += "/"
-				f.size = 0
-				f.isdir = true
-			} else {
-				f.size = parseInt64(&p.Size)
-				f.isdir = false
-			}
-
-			files = append(files, *f)
-		}
-
-		r.Props = nil
-		return nil
-	}
-
 	// 初始请求路径
 	requestPath := path
 	var err error
 	
 	// 循环处理分页
 	for {
+		// 每次请求都需要跳过目录自身的信息
+		skipSelf := true
+		parse := func(resp interface{}) error {
+			r := resp.(*response)
+
+			if skipSelf {
+				// 对于每一页，都需要跳过第一个条目（目录自身）
+				if p := getProps(r, "200"); p != nil && p.Type.Local == "collection" {
+					r.Props = nil
+					return nil
+				}
+				return newPathError("ReadDir", path, 405)
+			}
+
+			if p := getProps(r, "200"); p != nil {
+				f := new(File)
+				if ps, err := url.PathUnescape(r.Href); err == nil {
+					f.name = pathpkg.Base(ps)
+				} else {
+					f.name = p.Name
+				}
+				f.path = path + f.name
+				f.modified = parseModified(&p.Modified)
+				f.etag = p.ETag
+				f.contentType = p.ContentType
+
+				if p.Type.Local == "collection" {
+					f.path += "/"
+					f.size = 0
+					f.isdir = true
+				} else {
+					f.size = parseInt64(&p.Size)
+					f.isdir = false
+				}
+
+				files = append(files, *f)
+			}
+
+			r.Props = nil
+			return nil
+		}
+
 		rs, propErr := c.propfindWithResponse(requestPath, false,
 			`<d:propfind xmlns:d='DAV:'>
 				<d:prop>
