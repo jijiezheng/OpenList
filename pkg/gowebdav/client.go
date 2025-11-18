@@ -145,15 +145,16 @@ func (c *Client) ReadDir(path string) ([]os.FileInfo, error) {
 	
 	// 循环处理分页
 	for {
-		// 每次请求都需要跳过目录自身的信息
-		skipSelf := true
+		// 每页都需要跳过第一个目录本身条目
+		needSkipSelf := true
 		parse := func(resp interface{}) error {
 			r := resp.(*response)
 
-			if skipSelf {
-				// 对于每一页，都需要跳过第一个条目（目录自身）
+			if needSkipSelf {
+				// 跳过目录自身的信息
 				if p := getProps(r, "200"); p != nil && p.Type.Local == "collection" {
 					r.Props = nil
+					needSkipSelf = false
 					return nil
 				}
 				return newPathError("ReadDir", path, 405)
