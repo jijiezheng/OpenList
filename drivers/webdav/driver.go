@@ -2,12 +2,15 @@ package webdav
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path"
 	"time"
 
+	"github.com/OpenListTeam/OpenList/v4/drivers/base"
 	"github.com/OpenListTeam/OpenList/v4/internal/driver"
+	"github.com/OpenListTeam/OpenList/v4/internal/errs"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
 	"github.com/OpenListTeam/OpenList/v4/pkg/cron"
 	"github.com/OpenListTeam/OpenList/v4/pkg/gowebdav"
@@ -68,6 +71,22 @@ func (d *WebDav) Link(ctx context.Context, file model.Obj, args model.LinkArgs) 
 	if err != nil {
 		return nil, err
 	}
+	if args.Redirect {
+		// get the url after redirect
+		req := base.NoRedirectClient.R()
+		req.Header = header
+		req.SetDoNotParseResponse(true)
+		res, err := req.Get(url)
+		if err != nil {
+			return nil, err
+		}
+		_ = res.RawResponse.Body.Close()
+		if (res.StatusCode() == 302 || res.StatusCode() == 307 || res.StatusCode() == 308) && res.Header().Get("location") != "" {
+			url = res.Header().Get("location")
+		} else {
+			return nil, fmt.Errorf("redirect failed, status: %d", res.StatusCode())
+		}
+	}
 	return &model.Link{
 		URL:    url,
 		Header: header,
@@ -107,4 +126,25 @@ func (d *WebDav) Put(ctx context.Context, dstDir model.Obj, s model.FileStreamer
 	return err
 }
 
+// implements driver.Getter interface
+func (d *WebDav) Get(ctx context.Context, _path string) (model.Obj, error) {
+	_path = path.Join(d.GetRootPath(), _path)
+	info, err := d.client.Stat(_path)
+	if err != nil {
+		if gowebdav.IsErrNotFound(err) {
+			return nil, errs.ObjectNotFound
+		}
+		return nil, err
+	}
+
+	return &model.Object{
+		Name:     info.Name(),
+		Size:     info.Size(),
+		Modified: info.ModTime(),
+		IsFolder: info.IsDir(),
+		Path:     _path,
+	}, nil
+}
+
 var _ driver.Driver = (*WebDav)(nil)
+var _ driver.Getter = (*WebDav)(nil)

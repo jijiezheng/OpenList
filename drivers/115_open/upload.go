@@ -3,12 +3,14 @@ package _115_open
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
 	"time"
 
 	sdk "github.com/OpenListTeam/115-sdk-go"
 	"github.com/OpenListTeam/OpenList/v4/internal/driver"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
+	netutil "github.com/OpenListTeam/OpenList/v4/internal/net"
 	streamPkg "github.com/OpenListTeam/OpenList/v4/internal/stream"
 	"github.com/OpenListTeam/OpenList/v4/pkg/utils"
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
@@ -36,7 +38,7 @@ func calPartSize(fileSize int64) int64 {
 }
 
 func (d *Open115) singleUpload(ctx context.Context, tempF model.File, tokenResp *sdk.UploadGetTokenResp, initResp *sdk.UploadInitResp) error {
-	ossClient, err := oss.New(tokenResp.Endpoint, tokenResp.AccessKeyId, tokenResp.AccessKeySecret, oss.SecurityToken(tokenResp.SecurityToken))
+	ossClient, err := netutil.NewOSSClient(tokenResp.Endpoint, tokenResp.AccessKeyId, tokenResp.AccessKeySecret, oss.SecurityToken(tokenResp.SecurityToken))
 	if err != nil {
 		return err
 	}
@@ -69,8 +71,21 @@ func (d *Open115) singleUpload(ctx context.Context, tempF model.File, tokenResp 
 // 	} `json:"data"`
 // }
 
+// retryExpiredToken retries only the rejected OSS operation, preserving the upload ID.
+func retryExpiredToken(refresh func() error, operation func() error) error {
+	err := operation()
+	var serviceErr oss.ServiceError
+	if !errors.As(err, &serviceErr) || serviceErr.Code != "SecurityTokenExpired" {
+		return err
+	}
+	if err := refresh(); err != nil {
+		return err
+	}
+	return operation()
+}
+
 func (d *Open115) multpartUpload(ctx context.Context, stream model.FileStreamer, up driver.UpdateProgress, tokenResp *sdk.UploadGetTokenResp, initResp *sdk.UploadInitResp) error {
-	ossClient, err := oss.New(tokenResp.Endpoint, tokenResp.AccessKeyId, tokenResp.AccessKeySecret, oss.SecurityToken(tokenResp.SecurityToken))
+	ossClient, err := netutil.NewOSSClient(tokenResp.Endpoint, tokenResp.AccessKeyId, tokenResp.AccessKeySecret, oss.SecurityToken(tokenResp.SecurityToken))
 	if err != nil {
 		return err
 	}
@@ -79,7 +94,32 @@ func (d *Open115) multpartUpload(ctx context.Context, stream model.FileStreamer,
 		return err
 	}
 
-	imur, err := bucket.InitiateMultipartUpload(initResp.Object, oss.Sequential())
+	refresh := func() error {
+		if err := d.WaitLimit(ctx); err != nil {
+			return err
+		}
+		token, err := d.client.UploadGetToken(ctx)
+		if err != nil {
+			return err
+		}
+		client, err := netutil.NewOSSClient(token.Endpoint, token.AccessKeyId, token.AccessKeySecret, oss.SecurityToken(token.SecurityToken))
+		if err != nil {
+			return err
+		}
+		newBucket, err := client.Bucket(initResp.Bucket)
+		if err != nil {
+			return err
+		}
+		bucket = newBucket
+		return nil
+	}
+
+	var imur oss.InitiateMultipartUploadResult
+	err = retryExpiredToken(refresh, func() error {
+		var err error
+		imur, err = bucket.InitiateMultipartUpload(initResp.Object, oss.Sequential(), oss.WithContext(ctx))
+		return err
+	})
 	if err != nil {
 		return err
 	}
@@ -108,13 +148,17 @@ func (d *Open115) multpartUpload(ctx context.Context, stream model.FileStreamer,
 			return err
 		}
 		err = retry.Do(func() error {
-			rd.Seek(0, io.SeekStart)
-			part, err := bucket.UploadPart(imur, driver.NewLimitedUploadStream(ctx, rd), partSize, int(i))
-			if err != nil {
-				return err
-			}
-			parts[i-1] = part
-			return nil
+			return retryExpiredToken(refresh, func() error {
+				if _, err := rd.Seek(0, io.SeekStart); err != nil {
+					return err
+				}
+				part, err := bucket.UploadPart(imur, driver.NewLimitedUploadStream(ctx, rd), partSize, int(i), oss.WithContext(ctx))
+				if err != nil {
+					return err
+				}
+				parts[i-1] = part
+				return nil
+			})
 		},
 			retry.Context(ctx),
 			retry.Attempts(3),
@@ -133,14 +177,16 @@ func (d *Open115) multpartUpload(ctx context.Context, stream model.FileStreamer,
 		up(float64(offset) * 100 / float64(fileSize))
 	}
 
-	// callbackRespBytes := make([]byte, 1024)
-	_, err = bucket.CompleteMultipartUpload(
-		imur,
-		parts,
-		oss.Callback(base64.StdEncoding.EncodeToString([]byte(initResp.Callback.Value.Callback))),
-		oss.CallbackVar(base64.StdEncoding.EncodeToString([]byte(initResp.Callback.Value.CallbackVar))),
-		// oss.CallbackResult(&callbackRespBytes),
-	)
+	err = retryExpiredToken(refresh, func() error {
+		_, err := bucket.CompleteMultipartUpload(
+			imur,
+			parts,
+			oss.Callback(base64.StdEncoding.EncodeToString([]byte(initResp.Callback.Value.Callback))),
+			oss.CallbackVar(base64.StdEncoding.EncodeToString([]byte(initResp.Callback.Value.CallbackVar))),
+			oss.WithContext(ctx),
+		)
+		return err
+	})
 	if err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/OpenListTeam/OpenList/v4/internal/driver"
 	"github.com/OpenListTeam/OpenList/v4/internal/model"
@@ -16,7 +17,7 @@ import (
 )
 
 type SMB struct {
-	lastConnTime int64
+	lastConnTime atomic.Int64
 	model.Storage
 	Addition
 	fs *smb2.Share
@@ -209,10 +210,12 @@ func (d *SMB) GetDetails(ctx context.Context) (*model.StorageDetails, error) {
 	if err != nil {
 		return nil, err
 	}
+	total := int64(stat.BlockSize() * stat.TotalBlockCount())
+	free := int64(stat.BlockSize() * stat.AvailableBlockCount())
 	return &model.StorageDetails{
 		DiskUsage: model.DiskUsage{
-			TotalSpace: stat.BlockSize() * stat.TotalBlockCount(),
-			FreeSpace:  stat.BlockSize() * stat.AvailableBlockCount(),
+			TotalSpace: total,
+			UsedSpace:  total - free,
 		},
 	}, nil
 }
