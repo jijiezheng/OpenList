@@ -43,10 +43,27 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # GitHub release body max is 125000 characters; keep full CHANGELOG.md as an asset.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          limit = 120000
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          if len(text) > limit:
+              truncated = text[:limit].rsplit("\n", 1)[0]
+              text = (
+                  truncated
+                  + "\n\n...\n\n"
+                  + "> Full changelog is attached as `CHANGELOG.md` "
+                  + "(truncated due to GitHub release notes size limit).\n"
+              )
+          Path("RELEASE_NOTES.md").write_text(text, encoding="utf-8")
+          PY
+
           if ! gh release view beta; then
-            gh release create beta --prerelease --notes-file CHANGELOG.md
+            gh release create beta --prerelease --notes-file RELEASE_NOTES.md
           else
-            gh release edit beta --prerelease --notes-file CHANGELOG.md
+            gh release edit beta --prerelease --notes-file RELEASE_NOTES.md
           fi
           gh release upload beta "CHANGELOG.md" --clobber
 
